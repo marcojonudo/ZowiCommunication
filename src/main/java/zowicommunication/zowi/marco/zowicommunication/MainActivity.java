@@ -15,11 +15,11 @@ import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
-import android.widget.Button;
+import android.widget.EditText;
 import android.widget.Toast;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.io.IOException;
+import java.io.OutputStream;
 import java.util.Set;
 import java.util.UUID;
 
@@ -29,10 +29,11 @@ public class MainActivity extends AppCompatActivity {
     private Set<BluetoothDevice> pairedDevices;
     private BluetoothSocket bluetoothSocket;
     private BluetoothReceiver bluetoothReceiver;
+    private OutputStream outputStream;
 
-    public static int REQUEST_BLUETOOTH = 1;
     private static final int REQUEST_COARSE_LOCATION = 2;
-    static final UUID myUUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
+    static final UUID MY_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
+    private static final String ZOWI_NAME = "Zowi";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -60,7 +61,13 @@ public class MainActivity extends AppCompatActivity {
             ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.ACCESS_COARSE_LOCATION}, REQUEST_COARSE_LOCATION);
         }
         else {
-            startDiscovery();
+            String zowiAddress = getZowiAddress();
+            if (zowiAddress.equals("")) {
+                startDiscovery();
+            }
+            else {
+                connectDevice(zowiAddress);
+            }
         }
     }
 
@@ -75,6 +82,20 @@ public class MainActivity extends AppCompatActivity {
             default:
                 break;
         }
+    }
+
+    private void connectDevice(String zowiAddress) {
+        BluetoothDevice zowiDevice = bluetoothAdapter.getRemoteDevice(zowiAddress);
+        try {
+            bluetoothSocket = zowiDevice.createInsecureRfcommSocketToServiceRecord(MY_UUID);
+            bluetoothSocket.connect();
+            outputStream = bluetoothSocket.getOutputStream();
+            Log.i("connectDevice", "bluetoothSocket conectado");
+        }
+        catch (IOException e) {
+            e.printStackTrace();
+        }
+
     }
 
     private void startDiscovery() {
@@ -102,21 +123,34 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    public void getPairedDevices(View v) {
+    private String getZowiAddress() {
         pairedDevices = bluetoothAdapter.getBondedDevices();
 
         if (pairedDevices.size() > 0) {
             for (BluetoothDevice device : pairedDevices) {
-                Log.i("Devices", device.getName() + " | " + device.getAddress());
+                if (device.getName().equals(ZOWI_NAME)) {
+                    return device.getAddress();
+                }
             }
         }
-        else {
-            Log.i("Devices", "No paired devices");
+        return "";
+    }
+
+    public void sendCommand(View v) {
+        EditText command = (EditText) findViewById(R.id.command);
+        String commandText = command.getText().toString();
+        char r = '\r';
+
+        try {
+            outputStream.write(commandText.getBytes());
+            outputStream.write(r);
+        }
+        catch (IOException e) {
+            e.printStackTrace();
         }
     }
 
     private class BluetoothReceiver extends BroadcastReceiver {
-        private static final String ZOWI_NAME = "Zowi";
 
         @Override
         public void onReceive(Context context, Intent intent) {
@@ -132,6 +166,7 @@ public class MainActivity extends AppCompatActivity {
                 BluetoothDevice device = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
 
                 if (device.getName().equals(ZOWI_NAME)) {
+                    bluetoothAdapter.cancelDiscovery();
                     device.createBond();
                 }
                 Log.i("BluetoothReceiver", "Device discovered " + device.getName() + ": " + device.getAddress());
@@ -142,7 +177,7 @@ public class MainActivity extends AppCompatActivity {
                 int bondState = device.getBondState();
 
                 if (name.equals(ZOWI_NAME) && (bondState == BluetoothDevice.BOND_BONDED)) {
-
+                    connectDevice(device.getAddress());
                 }
             }
         }
